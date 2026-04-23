@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Spring Boot Parent: This line makes your project inherit
+        all default configurations from Spring Boot.
+        Think of it as your project extending a base class.
+        Version 3.2.5 is stable and works well with Java 17.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <!-- Your project's identity -->
+    <groupId>com.sterling</groupId>
+    <artifactId>eureka-server</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>eureka-server</name>
+
+    <properties>
+        <!-- We are using Java 17. Spring Boot 3.x requires minimum Java 17 -->
+        <java.version>17</java.version>
+        <!--
+            Spring Cloud Version: Spring Cloud is a separate project
+            that adds microservices tools ON TOP of Spring Boot.
+            Eureka, Gateway, Feign — all come from Spring Cloud.
+            2023.0.1 is compatible with Spring Boot 3.2.x
+        -->
+        <spring-cloud.version>2023.0.1</spring-cloud.version>
+    </properties>
+
+    <dependencies>
+        <!--
+            This is the Eureka Server dependency.
+            Adding this turns your Spring Boot app into a Eureka registry.
+            Without this, your app is just a plain Spring Boot app.
+        -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+        </dependency>
+
+        <!--
+            Spring Boot Test: Gives you tools to write tests.
+            scope "test" means this library is only used during testing,
+            not when the app is actually running.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!--
+        dependencyManagement: This section tells Maven which VERSION
+        of Spring Cloud libraries to use. Without this, Maven wouldn't
+        know which version of Eureka, Gateway etc. to download.
+        The <import> here pulls in a "bill of materials" (BOM) —
+        a pre-defined list of compatible versions.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <plugins>
+            <!--
+                This plugin lets you run your Spring Boot app with
+                "mvn spring-boot:run" and also packages it as a runnable JAR file.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

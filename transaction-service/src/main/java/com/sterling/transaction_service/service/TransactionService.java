@@ -1,8 +1,12 @@
 package com.sterling.transaction_service.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sterling.transaction_service.client.WalletServiceClient;
 import com.sterling.transaction_service.dto.*;
+import com.sterling.transaction_service.model.OutboxMessage;
 import com.sterling.transaction_service.model.Transaction;
+import com.sterling.transaction_service.repository.OutboxRepository;
 import com.sterling.transaction_service.repository.TransactionRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,18 +27,20 @@ public class TransactionService {
     @Autowired
     private WalletServiceClient walletServiceClient;
 
-    // transfer: Moves money from one user's wallet to another.
-    // This is the most critical method — it must be atomic in concept:
-    // deduct from sender AND credit to receiver. If either fails,
-    // we record a FAILED transaction so there is always an audit trail.
+    // ---- NEW: inject outbox repository and ObjectMapper ----
+    @Autowired
+    private OutboxRepository outboxRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+    // ---- END NEW ----
+
     public TransactionResponse transfer(TransferRequest request) {
         log.info("Transfer initiated. Sender: {}, Receiver: {}, Amount: {}",
                 request.getSenderUserId(),
                 request.getReceiverUserId(),
                 request.getAmount());
 
-        // Basic validation — can't transfer to yourself,
-        // can't transfer zero or negative amount
         if (request.getSenderUserId().equals(request.getReceiverUserId())) {
             log.warn("Transfer rejected - sender and receiver are the same: {}",
                     request.getSenderUserId());
@@ -46,11 +52,6 @@ public class TransactionService {
             throw new RuntimeException("Transfer amount must be greater than zero");
         }
 
-        // Create a transaction record upfront with FAILED status.
-        // Why? If the app crashes midway, we still have a record.
-        // We update it to SUCCESS only if everything completes.
-        // This is called "pessimistic recording" — assume failure,
-        // then update to success.
         Transaction transaction = new Transaction();
         transaction.setSenderUserId(request.getSenderUserId());
         transaction.setReceiverUserId(request.getReceiverUserId());
@@ -64,9 +65,6 @@ public class TransactionService {
         transaction.setCreatedAt(LocalDateTime.now());
 
         try {
-            // Step 1: Deduct from sender's wallet.
-            // WalletService internally checks if balance is sufficient.
-            // If insufficient → WalletService throws exception → caught below.
             log.debug("Deducting {} from senderUserId: {}",
                     request.getAmount(), request.getSenderUserId());
             walletServiceClient.deductBalance(
@@ -74,10 +72,6 @@ public class TransactionService {
             log.debug("Deduction successful for senderUserId: {}",
                     request.getSenderUserId());
 
-            // Step 2: Credit to receiver's wallet.
-            // If this fails after deduction — this is where distributed
-            // transactions get complex. For your project, log the error.
-            // In production, this would use a saga pattern or message queue.
             log.debug("Crediting {} to receiverUserId: {}",
                     request.getAmount(), request.getReceiverUserId());
             walletServiceClient.creditBalance(
@@ -85,20 +79,23 @@ public class TransactionService {
             log.debug("Credit successful for receiverUserId: {}",
                     request.getReceiverUserId());
 
-            // Both steps succeeded — mark transaction as SUCCESS
             transaction.setStatus("SUCCESS");
             Transaction saved = transactionRepository.save(transaction);
 
-            log.info("Transfer SUCCESS. TransactionId: {}, Sender: {}, Receiver: {}, Amount: {}",
-                    saved.getId(),
-                    request.getSenderUserId(),
+            log.info("Transfer SUCCESS. TransactionId: {}, Sender: {}, " +
+                            "Receiver: {}, Amount: {}",
+                    saved.getId(), request.getSenderUserId(),
+                    request.getReceiverUserId(), request.getAmount());
+
+            // ---- NEW: write to outbox after successful transfer ----
+            writeToOutbox(saved.getId(), request.getSenderUserId(),
                     request.getReceiverUserId(),
-                    request.getAmount());
+                    request.getAmount(), "TRANSFER");
+            // ---- END NEW ----
 
             return mapToResponse(saved);
 
         } catch (Exception e) {
-            // Something went wrong — save the FAILED record for audit trail
             Transaction saved = transactionRepository.save(transaction);
             log.error("Transfer FAILED. TransactionId: {}, Reason: {}",
                     saved.getId(), e.getMessage());
@@ -106,9 +103,6 @@ public class TransactionService {
         }
     }
 
-    // merchantPayment: Customer pays a merchant.
-    // Functionally identical to transfer but recorded as MERCHANT_PAYMENT type
-    // so reporting and history can distinguish between the two.
     public TransactionResponse merchantPayment(MerchantPaymentRequest request) {
         log.info("Merchant payment initiated. Customer: {}, Merchant: {}, Amount: {}",
                 request.getCustomerUserId(),
@@ -116,7 +110,8 @@ public class TransactionService {
                 request.getAmount());
 
         if (request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            log.warn("Merchant payment rejected - invalid amount: {}", request.getAmount());
+            log.warn("Merchant payment rejected - invalid amount: {}",
+                    request.getAmount());
             throw new RuntimeException("Payment amount must be greater than zero");
         }
 
@@ -146,6 +141,12 @@ public class TransactionService {
             log.info("Merchant payment SUCCESS. TransactionId: {}, Amount: {}",
                     saved.getId(), request.getAmount());
 
+            // ---- NEW: write to outbox ----
+            writeToOutbox(saved.getId(), request.getCustomerUserId(),
+                    request.getMerchantUserId(),
+                    request.getAmount(), "MERCHANT_PAYMENT");
+            // ---- END NEW ----
+
             return mapToResponse(saved);
 
         } catch (Exception e) {
@@ -156,49 +157,63 @@ public class TransactionService {
         }
     }
 
-    // getTransactionHistory: Returns all transactions for a user
-    // (both sent and received)
+    // ---- NEW: private helper to write outbox row ----
+    private void writeToOutbox(Long transactionId, Long senderUserId,
+                               Long receiverUserId, BigDecimal amount,
+                               String type) {
+        try {
+            WalletUpdateMessage message = new WalletUpdateMessage(
+                    transactionId, senderUserId, receiverUserId, amount, type);
+
+            // Serialize to JSON for storage in outbox DB
+            String payload = objectMapper.writeValueAsString(message);
+
+            OutboxMessage outbox = new OutboxMessage();
+            outbox.setTransactionId(transactionId);
+            outbox.setPayload(payload);
+            outbox.setStatus("PENDING");
+            outbox.setRetries(0);
+            outbox.setCreatedAt(LocalDateTime.now());
+            outbox.setUpdatedAt(LocalDateTime.now());
+
+            outboxRepository.save(outbox);
+
+            log.info("Outbox row written. TransactionId: {} Status: PENDING",
+                    transactionId);
+
+        } catch (JsonProcessingException e) {
+            // Transfer already succeeded — don't fail it because of outbox issue.
+            // Log it so someone can investigate.
+            log.error("Failed to write outbox for transactionId: {}. Error: {}",
+                    transactionId, e.getMessage(), e);
+        }
+    }
+    // ---- END NEW ----
+
     public List<TransactionResponse> getTransactionHistory(Long userId) {
         log.info("Fetching transaction history for userId: {}", userId);
-
         List<Transaction> transactions = transactionRepository
                 .findBySenderUserIdOrReceiverUserId(userId, userId);
-
         log.debug("Found {} transactions for userId: {}", transactions.size(), userId);
-
-        // stream() + map() + collect() = Java's way of converting
-        // a List<Transaction> into a List<TransactionResponse>
-        // For each Transaction object, call mapToResponse() on it,
-        // then collect all results into a new List.
         return transactions.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    // getTransactionById: Fetch one specific transaction by its ID
     public TransactionResponse getTransactionById(Long transactionId) {
         log.info("Fetching transaction by id: {}", transactionId);
-
         Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> {
                     log.error("Transaction not found with id: {}", transactionId);
                     return new RuntimeException("Transaction not found: " + transactionId);
                 });
-
         return mapToResponse(transaction);
     }
 
-    // mapToResponse: Converts Transaction entity → TransactionResponse DTO
     private TransactionResponse mapToResponse(Transaction t) {
         return new TransactionResponse(
-                t.getId(),
-                t.getSenderUserId(),
-                t.getReceiverUserId(),
-                t.getAmount(),
-                t.getType(),
-                t.getStatus(),
-                t.getDescription(),
-                t.getCreatedAt()
-        );
+                t.getId(), t.getSenderUserId(), t.getReceiverUserId(),
+                t.getAmount(), t.getType(), t.getStatus(),
+                t.getDescription(), t.getCreatedAt());
     }
 }

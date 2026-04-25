@@ -77,6 +77,21 @@
             <scope>test</scope>
         </dependency>
 
+        <!--
+    Spring AMQP: AMQP is the protocol RabbitMQ uses to communicate.
+    This single dependency gives you everything:
+    - RabbitTemplate (sending messages)
+    - @RabbitListener (receiving messages)
+    - Queue, Exchange, Binding (configuration)
+    - Jackson message converter (auto JSON conversion)
+    Spring Boot auto-configures the connection to RabbitMQ
+    using the properties you define in application.properties.
+-->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
     </dependencies>
 
     <dependencyManagement>

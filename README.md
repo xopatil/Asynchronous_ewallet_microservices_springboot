@@ -15,7 +15,6 @@ Sterling Corporation's E-Wallet allows users to:
 
 The system is built on a **microservices architecture** where each service is independently deployable, scalable, and fault-tolerant. Inter-service communication uses both **synchronous (Feign Client)** and **asynchronous (RabbitMQ)** patterns.
 
-[View Architecture Diagram](sterling-architecture.html)
 ---
 
 ## 🏗️ Architecture

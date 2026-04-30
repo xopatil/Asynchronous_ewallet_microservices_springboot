@@ -1,19 +1,18 @@
 # 💳 Sterling E-Wallet — Microservices Architecture
 
-A production-style **E-Wallet system** built with **Spring Boot Microservices**, featuring user management, wallet operations, and fund transfers with **asynchronous communication via RabbitMQ** and the **Outbox Pattern**.
-
+A production-style **E-Wallet system** built with **Spring Boot Microservices**, featuring user management, wallet operations, and fund transfers with **asynchronous communication via RabbitMQ**, the **Outbox Pattern**, and **OAuth2-style JWT Authentication**.
 
 ---
 
 ## 📌 Project Overview
 
 Sterling Corporation's E-Wallet allows users to:
-- Register and authenticate securely
+- Register and authenticate securely with OAuth2-style Bearer Token
 - Create and manage digital wallets
 - Transfer funds between users
 - Make merchant payments
 
-The system is built on a **microservices architecture** where each service is independently deployable, scalable, and fault-tolerant. Inter-service communication uses both **synchronous (Feign Client)** and **asynchronous (RabbitMQ)** patterns.
+The system is built on a **microservices architecture** where each service is independently deployable, scalable, and fault-tolerant. Inter-service communication uses both **synchronous (Feign Client)** and **asynchronous (RabbitMQ)** patterns. All requests are authenticated at the **API Gateway level** before reaching any microservice.
 
 ---
 
@@ -23,15 +22,16 @@ The system is built on a **microservices architecture** where each service is in
 Client (Postman / App)
          │
          ▼
-   API Gateway (:8080)          ← Single entry point, routes all requests
-         │
+   API Gateway (:8080)          ← Single entry point
+         │                         JWT validated HERE first
+         │                         ↕ Eureka for service routing
          ├──────────────────────────────────────┐
          │                                      │
          ▼                                      ▼
   User Service (:8082)            Wallet Service (:8083)
   - Registration                  - Create Wallet
-  - Login + JWT                   - Top Up
-  - Authentication                - Deduct / Credit Balance
+  - Login → OAuth2 Token          - Top Up
+  - JWT Auth + BCrypt             - Deduct / Credit Balance
          │                                      ▲
          │                                      │ RabbitMQ (Async)
          ▼                                      │
@@ -50,9 +50,9 @@ Transaction Service (:8084) ─────────────────�
 | Technology | Purpose |
 |---|---|
 | **Spring Boot 3.2.x** | Core framework for all microservices |
-| **Spring Cloud Gateway** | API Gateway — single entry point |
+| **Spring Cloud Gateway** | API Gateway — single entry point + JWT enforcement |
 | **Spring Cloud Netflix Eureka** | Service discovery and registration |
-| **Spring Security + JWT** | Authentication and authorization |
+| **Spring Security + JJWT** | OAuth2-style Bearer Token authentication |
 | **Spring Data JPA + H2** | Database layer (in-memory for development) |
 | **Spring AMQP + RabbitMQ** | Asynchronous messaging between services |
 | **OpenFeign** | Synchronous service-to-service HTTP calls |
@@ -70,15 +70,28 @@ Transaction Service (:8084) ─────────────────�
 sterling-ewallet/
 │
 ├── eureka-server/                    # Service registry
-├── api-gateway/                      # Routes all incoming requests
-├── user-service/                     # User registration, login, JWT
+│
+├── api-gateway/                      # Routes all requests + JWT enforcement
+│   └── src/main/java/com/sterling/api_gateway/
+│       └── security/
+│           ├── JwtUtil.java          # Token validation at gateway level
+│           └── JwtAuthFilter.java    # Global filter — blocks invalid tokens
+│
+├── user-service/                     # User registration, login, JWT issuer
 │   └── src/main/java/com/sterling/user_service/
-│       ├── controller/               # REST endpoints
-│       ├── service/                  # Business logic
-│       ├── repository/               # Database operations
-│       ├── model/                    # User entity
-│       ├── dto/                      # Request/Response objects
-│       └── security/                 # JWT + Spring Security
+│       ├── controller/
+│       ├── service/
+│       ├── repository/
+│       ├── model/
+│       ├── dto/
+│       │   ├── RegisterRequest.java
+│       │   ├── LoginRequest.java
+│       │   └── TokenResponse.java    # OAuth2-style token response
+│       └── security/
+│           ├── JwtUtil.java
+│           ├── JwtFilter.java
+│           ├── SecurityConfig.java
+│           └── CustomUserDetailsService.java
 │
 ├── wallet-service/                   # Wallet and balance management
 │   └── src/main/java/com/sterling/wallet_service/
@@ -87,6 +100,8 @@ sterling-ewallet/
 │       ├── repository/
 │       ├── model/
 │       ├── dto/
+│       ├── security/
+│       │   └── JwtUtil.java          # Token validation
 │       ├── config/                   # RabbitMQ configuration
 │       └── messaging/                # RabbitMQ listener + ACK publisher
 │
@@ -105,10 +120,51 @@ sterling-ewallet/
 
 ---
 
+## 🔐 OAuth2-Style JWT Authentication
+
+### How it Works
+
+The project does not use an external OAuth2 Authorization Server (Keycloak, Auth0, AWS Cognito). Instead it implements **OAuth2-style Bearer Token authentication** using self-signed JWTs via the JJWT library:
+
+```
+1. User registers → password BCrypt hashed → stored in DB
+2. User logs in → credentials verified → JWT token issued by User Service
+3. Login response follows OAuth2 token format
+4. Client sends token in every request: Authorization: Bearer <token>
+5. API Gateway JwtAuthFilter validates token FIRST
+6. Invalid token → 401 Unauthorized (never reaches service)
+7. Valid token → X-Username header added → forwarded to service
+8. Individual services also validate as a second security layer
+```
+
+### Login Response (OAuth2 Standard Format)
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiJ9...",
+  "token_type": "Bearer",
+  "expires_in": 86400,
+  "username": "alice"
+}
+```
+
+### Public Endpoints — No Token Required
+
+| Endpoint | Reason |
+|---|---|
+| `POST /users/register` | Users must register without a token |
+| `POST /users/login` | Users must login to GET a token |
+| `GET /actuator/**` | Health monitoring |
+
+### All Other Endpoints — Require `Authorization: Bearer <token>`
+
+---
+
 ## 🔄 Asynchronous Communication — Outbox Pattern with RabbitMQ
 
 ### The Problem with Pure Synchronous Communication
-In the original architecture, Transaction Service called Wallet Service directly via Feign Client. This meant:
+
+In the original architecture, Transaction Service called Wallet Service directly via Feign Client:
 - Client had to wait for BOTH services to complete
 - If Wallet Service was down → transfer failed completely
 - Services were tightly coupled
@@ -133,7 +189,7 @@ Write to OUTBOX TABLE (status = PENDING)
          ▼
 Return response to Client ✅  ← Client done. Doesn't wait anymore.
          │
-    (background)
+    (background — 5 seconds later)
          │
          ▼
 BacklogProcessor (@Scheduled every 5s)
@@ -178,15 +234,6 @@ deletes outbox row ✅ — fully acknowledged
 
 ---
 
-## 🔐 Security
-
-- All endpoints except `/users/register` and `/users/login` require a **JWT Bearer Token**
-- Passwords are hashed using **BCrypt** — never stored as plain text
-- JWT tokens expire after **24 hours**
-- Spring Security configured as **stateless** (no server-side sessions)
-
----
-
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -202,7 +249,6 @@ deletes outbox row ✅ — fully acknowledged
 
 **Windows:**
 ```bash
-# Navigate to RabbitMQ sbin folder
 cd "C:\Program Files\RabbitMQ Server\rabbitmq_server-x.x.x\sbin"
 rabbitmq-server.bat start
 ```
@@ -217,7 +263,7 @@ Verify at: `http://localhost:15672` (guest / guest)
 ### 2. Start Services in Order
 
 ```bash
-# Terminal 1 — Eureka Server
+# Terminal 1 — Eureka Server (always first)
 cd eureka-server && mvn spring-boot:run
 
 # Terminal 2 — User Service
@@ -229,7 +275,7 @@ cd wallet-service && mvn spring-boot:run
 # Terminal 4 — Transaction Service
 cd transaction-service && mvn spring-boot:run
 
-# Terminal 5 — API Gateway (start last)
+# Terminal 5 — API Gateway (always last)
 cd api-gateway && mvn spring-boot:run
 ```
 
@@ -250,12 +296,19 @@ cd api-gateway && mvn spring-boot:run
 http://localhost:8080
 ```
 
+### Authentication Header
+```
+Authorization: Bearer <access_token>
+```
+
+---
+
 ### User Service
 
 | Method | Endpoint | Auth | Body | Description |
 |---|---|---|---|---|
 | POST | `/users/register` | None | `{username, email, password}` | Register new user |
-| POST | `/users/login` | None | `{username, password}` | Login — returns JWT token |
+| POST | `/users/login` | None | `{username, password}` | Login — returns OAuth2 token |
 | GET | `/users/{username}` | JWT | — | Get user details |
 
 ### Wallet Service
@@ -277,92 +330,128 @@ http://localhost:8080
 
 ---
 
-## 🧪 Testing the Async Flow
+## 🧪 Complete Demo Flow
 
-### Step 1 — Register Users
+### Step 1 — Register Alice
 ```json
-POST /users/register
-{ "username": "alice", "email": "alice@gmail.com", "password": "pass123" }
+POST http://localhost:8080/users/register
+Content-Type: application/json
 
-POST /users/register
-{ "username": "bob", "email": "bob@gmail.com", "password": "pass123" }
+{"username":"alice","email":"alice@gmail.com","password":"pass123"}
 ```
+Expected: `201 Created`
 
-### Step 2 — Login
+### Step 2 — Register Bob
 ```json
-POST /users/login
-{ "username": "alice", "password": "pass123" }
+POST http://localhost:8080/users/register
+Content-Type: application/json
+
+{"username":"bob","email":"bob@gmail.com","password":"pass123"}
 ```
-Copy the JWT token from the response.
+Expected: `201 Created`
 
-### Step 3 — Setup Wallets
+### Step 3 — Login (Get OAuth2 Token)
 ```json
-POST /wallet/create?userId=1&username=alice
-POST /wallet/create?userId=2&username=bob
+POST http://localhost:8080/users/login
+Content-Type: application/json
 
-POST /wallet/topup
-{ "userId": 1, "amount": 1000.00 }
+{"username":"alice","password":"pass123"}
 ```
-
-### Step 4 — Transfer and Watch Async in Action
+Expected `200 OK`:
 ```json
-POST /transactions/transfer
 {
-  "senderUserId": 1,
-  "receiverUserId": 2,
-  "amount": 200.00,
-  "description": "Async transfer demo"
+  "access_token": "eyJhbGci...",
+  "token_type": "Bearer",
+  "expires_in": 86400,
+  "username": "alice"
 }
 ```
+Copy `access_token` — use it in all requests below.
 
-**What to observe in logs:**
+### Step 4 — Prove Gateway Blocks Unauthenticated Requests
 ```
-[10:00:00] Transaction Service → Transfer SUCCESS. TransactionId: 1
-[10:00:00] Transaction Service → Outbox row written. Status: PENDING
-[10:00:00] Postman receives 200 OK ← Client done
+GET http://localhost:8080/wallet/balance/1
+(no Authorization header)
+```
+Expected: `401 Unauthorized` — proves Gateway JWT enforcement works.
 
-(5 seconds later — background processing)
+### Step 5 — Create Wallets
+```
+POST http://localhost:8080/wallet/create?userId=1&username=alice
+Authorization: Bearer <access_token>
 
-[10:00:05] Transaction Service → BacklogProcessor found 1 PENDING message
-[10:00:05] Transaction Service → Message published to RabbitMQ
-[10:00:05] Wallet Service      → RabbitMQ message received. TransactionId: 1
-[10:00:05] Wallet Service      → Wallet update SUCCESS
-[10:00:05] Wallet Service      → ACK published
-[10:00:05] Transaction Service → ACK received → Outbox row DELETED
+POST http://localhost:8080/wallet/create?userId=2&username=bob
+Authorization: Bearer <access_token>
 ```
 
-The **5 second gap** between client response and wallet update is proof of asynchronous communication.
+### Step 6 — Top Up Alice
+```json
+POST http://localhost:8080/wallet/topup
+Authorization: Bearer <access_token>
+Content-Type: application/json
 
-### Verify via H2 Console
+{"userId":1,"amount":1000.00}
+```
+Expected: balance = `1000.00`
 
+### Step 7 — Check Balances Before Transfer
+```
+GET http://localhost:8080/wallet/balance/1    → 1000.00
+GET http://localhost:8080/wallet/balance/2    → 0.00
+```
+
+### Step 8 — Async Transfer (Key Demo)
+```json
+POST http://localhost:8080/transactions/transfer
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{"senderUserId":1,"receiverUserId":2,"amount":200.00,"description":"Async demo"}
+```
+Response comes back **immediately**. Watch console logs for the 5-second async flow.
+
+### Step 9 — Check Outbox Table (H2 Console)
 ```
 URL:      http://localhost:8084/h2-console
 JDBC URL: jdbc:h2:mem:transactiondb
-Username: sa
-Password: (blank)
+Username: sa   Password: (blank)
+
+SELECT * FROM outbox_messages;
+-- Shows PENDING/SENT during processing, then 0 rows after ACK
 ```
 
-```sql
--- Shows PENDING/SENT rows during processing
-SELECT * FROM outbox_messages;
+### Step 10 — Verify Balances After Transfer
+```
+GET http://localhost:8080/wallet/balance/1    → 800.00
+GET http://localhost:8080/wallet/balance/2    → 200.00
+```
 
--- Should be empty after ACK received
-SELECT COUNT(*) FROM outbox_messages;
+### Step 11 — Transaction History
+```
+GET http://localhost:8080/transactions/history/1
+Authorization: Bearer <access_token>
+```
+
+### Step 12 — Merchant Payment
+```json
+POST http://localhost:8080/transactions/merchant-payment
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{"customerUserId":1,"merchantUserId":2,"amount":100.00,"description":"Merchant demo"}
 ```
 
 ---
 
-## 🗄️ Database Setup
+## 🗄️ Database Reference
 
-Each service has its own **isolated H2 in-memory database**:
+| Service | DB Name | H2 Console | JDBC URL |
+|---|---|---|---|
+| User Service | `userdb` | `http://localhost:8082/h2-console` | `jdbc:h2:mem:userdb` |
+| Wallet Service | `walletdb` | `http://localhost:8083/h2-console` | `jdbc:h2:mem:walletdb` |
+| Transaction Service | `transactiondb` | `http://localhost:8084/h2-console` | `jdbc:h2:mem:transactiondb` |
 
-| Service | DB Name | Console URL |
-|---|---|---|
-| User Service | `userdb` | `http://localhost:8082/h2-console` |
-| Wallet Service | `walletdb` | `http://localhost:8083/h2-console` |
-| Transaction Service | `transactiondb` | `http://localhost:8084/h2-console` |
-
-> **Note:** H2 is an in-memory database. All data resets when services restart. For production, replace with MySQL or PostgreSQL.
+> H2 is in-memory. Data resets on restart. Replace with MySQL/PostgreSQL for production.
 
 ---
 
@@ -382,25 +471,18 @@ Each service has its own **isolated H2 in-memory database**:
 
 ## 📝 Logging
 
-All services use **SLF4J with Logback** via Lombok's `@Slf4j` annotation. Log files are written to:
+Log files written to each service's `logs/` folder. All use `@Slf4j`.
 
-```
-user-service/logs/user-service.log
-wallet-service/logs/wallet-service.log
-transaction-service/logs/transaction-service.log
-```
-
-Log levels:
-- `INFO` — business events (transfers, registrations, ACKs)
-- `DEBUG` — technical details (SQL, method calls)
-- `WARN` — non-critical issues (retry attempts)
-- `ERROR` — failures with full stack trace
+| Level | Used for |
+|---|---|
+| `INFO` | Business events — transfers, registrations, ACKs, token issuance |
+| `DEBUG` | Technical details — SQL queries, JWT validation, routing |
+| `WARN` | Non-critical — retry attempts, duplicate registrations |
+| `ERROR` | Failures with full stack trace |
 
 ---
 
 ## 🔍 Health Monitoring
-
-All services expose Spring Boot Actuator endpoints:
 
 ```
 GET http://localhost:{port}/actuator/health
@@ -413,9 +495,10 @@ GET http://localhost:{port}/actuator/info
 
 | Pattern | Where Used |
 |---|---|
-| **Outbox Pattern** | Transaction Service — guarantees zero message loss |
+| **OAuth2 Bearer Token** | API Gateway — centralized JWT enforcement |
+| **Outbox Pattern** | Transaction Service — zero message loss guarantee |
 | **Service Registry** | Eureka — dynamic service discovery |
-| **API Gateway** | Single entry point — routing and load balancing |
+| **API Gateway Pattern** | Single entry point — routing, auth, load balancing |
 | **Repository Pattern** | All services — data access abstraction |
 | **DTO Pattern** | All services — separates API contract from DB model |
 | **Pessimistic Recording** | Transaction Service — saves FAILED first, updates to SUCCESS |
@@ -426,4 +509,4 @@ GET http://localhost:{port}/actuator/info
 
 **Soham Patil**
 Internship Project — Sterling Corporation E-Wallet System
-Built with Spring Boot Microservices + RabbitMQ Async Architecture
+Spring Boot Microservices · RabbitMQ Async · OAuth2-style JWT Authentication

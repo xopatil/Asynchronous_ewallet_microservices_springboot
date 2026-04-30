@@ -2,6 +2,7 @@ package com.sterling.user_service.service;
 
 import com.sterling.user_service.dto.LoginRequest;
 import com.sterling.user_service.dto.RegisterRequest;
+import com.sterling.user_service.dto.TokenResponse;
 import com.sterling.user_service.model.User;
 import com.sterling.user_service.repository.UserRepository;
 import com.sterling.user_service.security.JwtUtil;
@@ -69,27 +70,33 @@ public class UserService {
         return "User registered successfully";
     }
 
-    // loginUser: Verifies credentials and returns a JWT token.
-    public String loginUser(LoginRequest request) {
-
-        // AuthenticationManager.authenticate() does two things automatically:
-        // 1. Looks up the user by username in the database
-        // 2. Compares the provided password against the stored BCrypt hash
-        // If wrong → throws BadCredentialsException (Spring Security handles this)
-        // If correct → authentication succeeds silently
+    // loginUser: Verifies credentials and returns OAuth2-style token response
+    public TokenResponse loginUser(LoginRequest request) {
         log.info("Login attempt for username: {}", request.getUsername());
 
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getUsername(),
-                        request.getPassword()
-                )
-        );
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.getUsername(),
+                            request.getPassword()
+                    )
+            );
+        } catch (Exception e) {
+            log.error("Login failed for username: {}", request.getUsername());
+            throw new RuntimeException("Invalid credentials");
+        }
 
-        // If we reach here, credentials were valid.
-        // Generate and return a JWT token for this user.
+        String token = jwtUtil.generateToken(request.getUsername());
+
         log.info("Login successful for username: {}", request.getUsername());
-        return jwtUtil.generateToken(request.getUsername());
+
+        // Return OAuth2-style response instead of plain token string
+        return new TokenResponse(
+                token,           // access_token
+                "Bearer",        // token_type
+                86400,           // expires_in (seconds) = 24 hours
+                request.getUsername() // username
+        );
     }
 
     // getUserByUsername: Fetches user details (for other services to call if needed)

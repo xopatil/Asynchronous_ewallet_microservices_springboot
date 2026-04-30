@@ -2,19 +2,21 @@ package com.sterling.user_service.controller;
 
 import com.sterling.user_service.dto.LoginRequest;
 import com.sterling.user_service.dto.RegisterRequest;
+import com.sterling.user_service.dto.TokenResponse;
 import com.sterling.user_service.model.User;
 import com.sterling.user_service.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import lombok.extern.slf4j.Slf4j;
 
 // @RestController = @Controller + @ResponseBody combined.
 // @Controller      → this class handles HTTP requests
 // @ResponseBody    → return values are automatically converted to JSON
 //                   (so you return a String or object, client receives JSON)
 @RestController
-
+@Slf4j
 // @RequestMapping("/users"): All endpoints in this controller
 // are prefixed with /users.
 // So a method mapped to "/register" becomes "/users/register" in full.
@@ -43,18 +45,15 @@ public class UserController {
         }
     }
 
-    // @PostMapping("/login"): Handles POST /users/login
-    // Returns a JWT token string if credentials are correct
     @PostMapping("/login")
-    public ResponseEntity<String> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<TokenResponse> login(@RequestBody LoginRequest request) {
         try {
-            String token = userService.loginUser(request);
-            // HTTP 200 OK = success
-            return ResponseEntity.ok(token);
+            TokenResponse tokenResponse = userService.loginUser(request);
+            log.info("POST /users/login success for: {}", request.getUsername());
+            return ResponseEntity.ok(tokenResponse);
         } catch (Exception e) {
-            // HTTP 401 Unauthorized = wrong credentials
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Invalid credentials");
+            log.error("POST /users/login failed for username: {}", request.getUsername());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
     }
 

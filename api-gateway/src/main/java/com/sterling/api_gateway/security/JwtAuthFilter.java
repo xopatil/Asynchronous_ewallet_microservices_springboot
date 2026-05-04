@@ -75,10 +75,13 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
         // Token is valid — extract username and add to request headers
         // Downstream services can read X-Username header to know who is logged in
         String username = jwtUtil.extractUsername(token);
+        Long userId = jwtUtil.extractUserId(token);
+
         log.debug("JWT valid for username: {} — forwarding to service", username);
 
         // Add username as a header so downstream services know who made the request
         ServerHttpRequest modifiedRequest = request.mutate()
+                .header("X-User-Id", String.valueOf(userId))
                 .header("X-Username", username)
                 .build();
 

@@ -22,12 +22,19 @@ public class WalletController {
     // This is called by User Service after registration (or manually via Postman)
     @PostMapping("/create")
     public ResponseEntity<WalletResponse> createWallet(
-            @RequestParam Long userId,
-            @RequestParam String username) {
+            @RequestHeader(value = "X-User-Id", required = false) Long authenticatedUserId,
+            @RequestHeader(value = "X-Username", required = false) String username) {
 
-        log.info("POST /wallet/create called. UserId: {}, Username: {}", userId, username);
+        if (authenticatedUserId == null || username == null) {
+            log.warn("Unauthorized /wallet/create call - missing authentication headers");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        log.info("POST /wallet/create called. Authenticated UserId: {}, Username: {}",
+                authenticatedUserId, username);
+
         try {
-            WalletResponse response = walletService.createWallet(userId, username);
+            WalletResponse response = walletService.createWallet(authenticatedUserId, username);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (RuntimeException e) {
             log.error("Failed to create wallet: {}", e.getMessage());
@@ -37,9 +44,26 @@ public class WalletController {
 
     // GET /wallet/{userId}
     // Returns wallet info and current balance for a user
+    // GET /wallet/{userId}
+// Returns wallet info and current balance for the authenticated user
     @GetMapping("/{userId}")
-    public ResponseEntity<WalletResponse> getWallet(@PathVariable Long userId) {
-        log.info("GET /wallet/{} called", userId);
+    public ResponseEntity<WalletResponse> getWallet(
+            @RequestHeader(value = "X-User-Id", required = false) Long authenticatedUserId,
+            @PathVariable Long userId) {
+
+        if (authenticatedUserId == null) {
+            log.warn("Unauthorized GET /wallet/{} - missing X-User-Id", userId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        log.info("GET /wallet/{} called by AuthUser: {}", userId, authenticatedUserId);
+
+        if (!authenticatedUserId.equals(userId)) {
+            log.warn("Forbidden wallet access attempt. AuthUser: {}, RequestedUser: {}",
+                    authenticatedUserId, userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
             WalletResponse response = walletService.getWalletByUserId(userId);
             return ResponseEntity.ok(response);
@@ -49,12 +73,31 @@ public class WalletController {
         }
     }
 
+
     // POST /wallet/topup
     // Body: { "userId": 1, "amount": 500.00 }
+    // POST /wallet/topup
+// Body: { "userId": 1, "amount": 500.00 }
+// Only allow top-up for the authenticated user
     @PostMapping("/topup")
-    public ResponseEntity<WalletResponse> topUp(@RequestBody TopUpRequest request) {
-        log.info("POST /wallet/topup called. UserId: {}, Amount: {}",
-                request.getUserId(), request.getAmount());
+    public ResponseEntity<WalletResponse> topUp(
+            @RequestHeader(value = "X-User-Id", required = false) Long authenticatedUserId,
+            @RequestBody TopUpRequest request) {
+
+        if (authenticatedUserId == null) {
+            log.warn("Unauthorized POST /wallet/topup - missing X-User-Id");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        log.info("POST /wallet/topup called. AuthUser: {}, BodyUser: {}, Amount: {}",
+                authenticatedUserId, request.getUserId(), request.getAmount());
+
+        if (!authenticatedUserId.equals(request.getUserId())) {
+            log.warn("Forbidden topUp attempt. AuthUser: {}, BodyUser: {}",
+                    authenticatedUserId, request.getUserId());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
             WalletResponse response = walletService.topUp(request);
             return ResponseEntity.ok(response);
@@ -63,6 +106,7 @@ public class WalletController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
     }
+
 
     // POST /wallet/deduct
     // Called internally by Transaction Service — not meant for direct client use
@@ -76,11 +120,15 @@ public class WalletController {
         try {
             WalletResponse response = walletService.deductBalance(userId, amount);
             return ResponseEntity.ok(response);
+        } catch (com.sterling.wallet_service.exception.InsufficientBalanceException e) {
+            log.warn("Deduction failed due to insufficient balance: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(null);
         } catch (RuntimeException e) {
             log.error("Deduction failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
     }
+
 
     // POST /wallet/credit
     // Called internally by Transaction Service when receiver gets money

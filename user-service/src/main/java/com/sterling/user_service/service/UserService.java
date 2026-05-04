@@ -71,6 +71,33 @@ public class UserService {
     }
 
     // loginUser: Verifies credentials and returns OAuth2-style token response
+//    public TokenResponse loginUser(LoginRequest request) {
+//        log.info("Login attempt for username: {}", request.getUsername());
+//
+//        try {
+//            authenticationManager.authenticate(
+//                    new UsernamePasswordAuthenticationToken(
+//                            request.getUsername(),
+//                            request.getPassword()
+//                    )
+//            );
+//        } catch (Exception e) {
+//            log.error("Login failed for username: {}", request.getUsername());
+//            throw new RuntimeException("Invalid credentials");
+//        }
+//
+//        String token = jwtUtil.generateToken(request.getUsername());
+//
+//        log.info("Login successful for username: {}", request.getUsername());
+//
+//        // Return OAuth2-style response instead of plain token string
+//        return new TokenResponse(
+//                token,           // access_token
+//                "Bearer",        // token_type
+//                86400,           // expires_in (seconds) = 24 hours
+//                request.getUsername() // username
+//        );
+//    }
     public TokenResponse loginUser(LoginRequest request) {
         log.info("Login attempt for username: {}", request.getUsername());
 
@@ -86,18 +113,22 @@ public class UserService {
             throw new RuntimeException("Invalid credentials");
         }
 
-        String token = jwtUtil.generateToken(request.getUsername());
+        User user = userRepository.findByUsername(request.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername());
 
         log.info("Login successful for username: {}", request.getUsername());
 
-        // Return OAuth2-style response instead of plain token string
         return new TokenResponse(
-                token,           // access_token
-                "Bearer",        // token_type
-                86400,           // expires_in (seconds) = 24 hours
-                request.getUsername() // username
+                token,
+                "Bearer",
+                86400,
+                user.getUsername(),
+                user.getId()
         );
     }
+
 
     // getUserByUsername: Fetches user details (for other services to call if needed)
     public User getUserByUsername(String username) {

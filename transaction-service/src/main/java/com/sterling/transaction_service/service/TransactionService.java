@@ -95,11 +95,11 @@ public class TransactionService {
 
             return mapToResponse(saved);
 
-        } catch (Exception e) {
+        }  catch (feign.FeignException e) {
             Transaction saved = transactionRepository.save(transaction);
-            log.error("Transfer FAILED. TransactionId: {}, Reason: {}",
-                    saved.getId(), e.getMessage());
-            throw new RuntimeException("Transfer failed: " + e.getMessage());
+            log.error("Transfer FAILED. TransactionId: {}, Downstream status: {}, Reason: {}",
+                    saved.getId(), e.status(), e.getMessage());
+            throw e;
         }
     }
 
@@ -149,11 +149,12 @@ public class TransactionService {
 
             return mapToResponse(saved);
 
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             Transaction saved = transactionRepository.save(transaction);
-            log.error("Merchant payment FAILED. TransactionId: {}, Reason: {}",
+            log.error("Transfer FAILED. TransactionId: {}, Reason: {}",
                     saved.getId(), e.getMessage());
-            throw new RuntimeException("Merchant payment failed: " + e.getMessage());
+            throw new RuntimeException("Transfer failed: " + e.getMessage());
         }
     }
 

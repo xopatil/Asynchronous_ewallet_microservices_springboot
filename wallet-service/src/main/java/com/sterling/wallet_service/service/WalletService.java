@@ -8,7 +8,7 @@ import com.sterling.wallet_service.repository.WalletRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
+import com.sterling.wallet_service.exception.InsufficientBalanceException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -50,6 +50,7 @@ public class WalletService {
                     username, e.getMessage());
             throw new RuntimeException("Cannot verify user. Please try again later.");
         }
+
 
         // Build the new wallet object
         Wallet wallet = new Wallet();
@@ -134,7 +135,7 @@ public class WalletService {
         if (wallet.getBalance().compareTo(amount) < 0) {
             log.warn("Insufficient balance for userId: {}. Balance: {}, Required: {}",
                     userId, wallet.getBalance(), amount);
-            throw new RuntimeException("Insufficient balance");
+            throw new InsufficientBalanceException("Insufficient balance");
         }
 
         BigDecimal oldBalance = wallet.getBalance();

@@ -35,20 +35,38 @@ public class JwtUtil {
     //   header    = algorithm info (HS256)
     //   payload   = claims (username, expiry, issued-at) — visible to anyone!
     //   signature = cryptographic proof this token wasn't tampered with
-    public String generateToken(String username) {
+//    public String generateToken(String username) {
+//        return Jwts.builder()
+//                // setSubject: who this token belongs to (the username)
+//                .setSubject(username)
+//                // setIssuedAt: timestamp of when this token was created
+//                .setIssuedAt(new Date())
+//                // setExpiration: when this token stops being valid
+//                // new Date() = right now. Adding expiration ms = future time.
+//                .setExpiration(new Date(System.currentTimeMillis() + expiration))
+//                // signWith: cryptographically sign the token with our secret key
+//                // This prevents anyone from forging or modifying tokens.
+//                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+//                // compact: converts the builder into the actual token string
+//                .compact();
+//    }
+    public String generateToken(Long userId, String username) {
         return Jwts.builder()
-                // setSubject: who this token belongs to (the username)
                 .setSubject(username)
-                // setIssuedAt: timestamp of when this token was created
+                .claim("userId", userId)
+                .claim("username", username)
                 .setIssuedAt(new Date())
-                // setExpiration: when this token stops being valid
-                // new Date() = right now. Adding expiration ms = future time.
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))
-                // signWith: cryptographically sign the token with our secret key
-                // This prevents anyone from forging or modifying tokens.
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
-                // compact: converts the builder into the actual token string
                 .compact();
+    }
+    public Long extractUserId(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
     }
 
     // extractUsername: Opens a token and reads who it belongs to.

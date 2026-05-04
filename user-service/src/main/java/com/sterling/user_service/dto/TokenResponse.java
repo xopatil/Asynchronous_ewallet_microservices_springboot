@@ -32,4 +32,7 @@ public class TokenResponse {
     // The username this token belongs to
     @JsonProperty("username")
     private String username;
+
+    @JsonProperty("user_id")
+    private Long userId;
 }

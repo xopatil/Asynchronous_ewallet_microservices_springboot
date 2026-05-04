@@ -30,6 +30,14 @@ public class JwtUtil {
                 .getBody()
                 .getSubject();
     }
+    public Long extractUserId(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
+    }
 
     public boolean validateToken(String token) {
         try {

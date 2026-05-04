@@ -19,41 +19,99 @@ public class TransactionController {
 
     // POST /transactions/transfer
     // Body: { "senderUserId": 1, "receiverUserId": 2,
-    //         "amount": 200.00, "description": "Paying back" }
+//    //         "amount": 200.00, "description": "Paying back" }
+//    @PostMapping("/transfer")
+//    public ResponseEntity<TransactionResponse> transfer(
+//            @RequestBody TransferRequest request) {
+//        log.info("POST /transactions/transfer called. Sender: {}, Receiver: {}, Amount: {}",
+//                request.getSenderUserId(),
+//                request.getReceiverUserId(),
+//                request.getAmount());
+//        try {
+//            TransactionResponse response = transactionService.transfer(request);
+//            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+//        } catch (RuntimeException e) {
+//            log.error("Transfer request failed: {}", e.getMessage());
+//            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+//        }
+//    }
+//
+//    // POST /transactions/merchant-payment
+//    // Body: { "customerUserId": 1, "merchantUserId": 3,
+//    //         "amount": 150.00, "description": "Coffee shop" }
+//    @PostMapping("/merchant-payment")
+//    public ResponseEntity<TransactionResponse> merchantPayment(
+//            @RequestBody MerchantPaymentRequest request) {
+//        log.info("POST /transactions/merchant-payment called. Customer: {}, Merchant: {}, Amount: {}",
+//                request.getCustomerUserId(),
+//                request.getMerchantUserId(),
+//                request.getAmount());
+//        try {
+//            TransactionResponse response = transactionService.merchantPayment(request);
+//            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+//        } catch (RuntimeException e) {
+//            log.error("Merchant payment request failed: {}", e.getMessage());
+//            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+//        }
+//    }
     @PostMapping("/transfer")
     public ResponseEntity<TransactionResponse> transfer(
+            @RequestHeader("X-User-Id") Long authenticatedUserId,
             @RequestBody TransferRequest request) {
-        log.info("POST /transactions/transfer called. Sender: {}, Receiver: {}, Amount: {}",
+
+        log.info("POST /transactions/transfer called. AuthUser: {}, Sender: {}, Receiver: {}, Amount: {}",
+                authenticatedUserId,
                 request.getSenderUserId(),
                 request.getReceiverUserId(),
                 request.getAmount());
+
+        if (!authenticatedUserId.equals(request.getSenderUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
             TransactionResponse response = transactionService.transfer(request);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (feign.FeignException e) {
+            if (e.status() == HttpStatus.CONFLICT.value()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            }
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         } catch (RuntimeException e) {
             log.error("Transfer request failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
     }
 
-    // POST /transactions/merchant-payment
-    // Body: { "customerUserId": 1, "merchantUserId": 3,
-    //         "amount": 150.00, "description": "Coffee shop" }
     @PostMapping("/merchant-payment")
     public ResponseEntity<TransactionResponse> merchantPayment(
+            @RequestHeader("X-User-Id") Long authenticatedUserId,
             @RequestBody MerchantPaymentRequest request) {
-        log.info("POST /transactions/merchant-payment called. Customer: {}, Merchant: {}, Amount: {}",
+
+        log.info("POST /transactions/merchant-payment called. AuthUser: {}, Customer: {}, Merchant: {}, Amount: {}",
+                authenticatedUserId,
                 request.getCustomerUserId(),
                 request.getMerchantUserId(),
                 request.getAmount());
+
+        if (!authenticatedUserId.equals(request.getCustomerUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
             TransactionResponse response = transactionService.merchantPayment(request);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (feign.FeignException e) {
+            if (e.status() == HttpStatus.CONFLICT.value()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            }
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         } catch (RuntimeException e) {
             log.error("Merchant payment request failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
     }
+
 
     // GET /transactions/history/{userId}
     // Returns all transactions (sent + received) for a user

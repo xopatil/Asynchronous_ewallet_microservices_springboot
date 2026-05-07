@@ -1,3 +1,5 @@
 # Default ignored files
 /shelf/
 /workspace.xml
+transaction-service/logs
+wallet-service/logs

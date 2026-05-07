@@ -14,6 +14,12 @@ Sterling Corporation's E-Wallet allows users to:
 
 The system is built on a **microservices architecture** where each service is independently deployable, scalable, and fault-tolerant. Inter-service communication uses both **synchronous (Feign Client)** and **asynchronous (RabbitMQ)** patterns. All requests are authenticated at the **API Gateway level** before reaching any microservice.
 
+
+## 🔗 Frontend Repository
+
+You can find the frontend code here:  
+👉 https://github.com/xopatil/Asynchronous_ewallet_microservices_springboot_frontend.git
+
 ---
 
 ## 🏗️ Architecture

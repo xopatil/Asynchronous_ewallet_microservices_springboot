@@ -1,3 +1,0 @@
-2026-05-05T13:01:12.549+05:30  WARN 26828 --- [wallet-service] [HikariPool-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=19h20m305ms303µs700ns).
-2026-05-05T13:02:48.432+05:30  WARN 26828 --- [wallet-service] [HikariPool-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=1m35s882ms368µs500ns).
-2026-05-05T13:05:20.723+05:30  INFO 26828 --- [wallet-service] [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
